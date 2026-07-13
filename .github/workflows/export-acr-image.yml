@@ -1,35 +1,40 @@
-name: Export ACR Image
+name: Mirror ACR Image To GHCR
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: ACR image tag to export
+        description: ACR image tag to mirror
         required: true
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  export:
+  mirror:
     runs-on: ubuntu-latest
     steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Login to Aliyun ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Export amd64 image
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Mirror multi-arch image
         env:
-          IMAGE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/cli-proxy-api:${{ inputs.version }}-amd64
+          SOURCE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/cli-proxy-api
+          TARGET: ghcr.io/overloaded-org/cliproxyapi
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          docker pull "${IMAGE}"
-          docker save "${IMAGE}" | gzip -9 > cli-proxy-api-linux-amd64.tar.gz
-          sha256sum cli-proxy-api-linux-amd64.tar.gz > cli-proxy-api-linux-amd64.tar.gz.sha256
-      - name: Upload image archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: cli-proxy-api-linux-amd64
-          path: |
-            cli-proxy-api-linux-amd64.tar.gz
-            cli-proxy-api-linux-amd64.tar.gz.sha256
-          retention-days: 1
+          docker buildx imagetools create --tag "${TARGET}:latest" "${SOURCE}:latest"
+          docker buildx imagetools create --tag "${TARGET}:${VERSION}" "${SOURCE}:${VERSION}"
